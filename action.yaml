@@ -1,0 +1,115 @@
+name: Fix Code securely
+description: Fix Code securely
+author: Shunsuke Suzuki
+branding:
+  icon: git-commit
+  color: blue
+inputs:
+  app_id:
+    description: |
+      GitHub App ID
+    required: true
+  app_private_key:
+    description: |
+      GitHub App Private Key
+    required: true
+  server_repository:
+    description: |
+      Server repository name
+    required: false
+    default: securefix
+runs:
+  using: composite
+  steps:
+    - id: artifact-name
+      shell: bash
+      run: |
+        value=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 32)
+        echo "value=securefix-${value}" >> "$GITHUB_OUTPUT"
+    - id: files
+      shell: bash
+      env:
+        ARTIFACT_NAME: ${{ steps.artifact-name.outputs.value }}
+      run: |
+        FILES=$(git ls-files --modified --others --exclude-standard)
+        if [ -z "$FILES" ]; then
+          echo "::notice:: No changes" >&2
+          exit 0
+        fi
+        {
+          echo 'value<<EOF'
+          echo "$FILES"
+          echo EOF
+        } >> "$GITHUB_OUTPUT"
+    - uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2.1.0
+      if: steps.files.outputs.value != ''
+      id: token
+      with:
+        app_id: ${{inputs.app_id}}
+        private_key: ${{inputs.app_private_key}}
+        repositories: >-
+          ["${{inputs.server_repository}}"]
+        permissions: >-
+          {
+            "issues": "write"
+          }
+    - if: steps.files.outputs.value != ''
+      shell: bash
+      run: echo "$METADATA" > "${ARTIFACT_NAME}.json"
+      env:
+        ARTIFACT_NAME: ${{ steps.artifact-name.outputs.value }}
+        METADATA: |
+          {
+            "pull_request": {
+              "number": "${{ github.event.number }}"
+            }
+          }
+    - if: steps.files.outputs.value != ''
+      shell: bash
+      run: echo "$FILES" > "${ARTIFACT_NAME}_files.txt"
+      env:
+        ARTIFACT_NAME: ${{ steps.artifact-name.outputs.value }}
+        FILES: ${{ steps.files.outputs.value }}
+    - if: steps.files.outputs.value != ''
+      uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+      with:
+        name: ${{steps.artifact-name.outputs.value}}
+        path: |
+          ${{ steps.files.outputs.value }}
+          ${{steps.artifact-name.outputs.value}}.json
+          ${{steps.artifact-name.outputs.value}}_files.txt
+    - if: steps.files.outputs.value != ''
+      shell: bash
+      run: rm "${ARTIFACT_NAME}.json" "${ARTIFACT_NAME}_files.txt"
+      env:
+        ARTIFACT_NAME: ${{ steps.artifact-name.outputs.value }}
+    - if: steps.files.outputs.value != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        ARTIFACT_NAME: ${{ steps.artifact-name.outputs.value }}
+        REPO: ${{inputs.server_repository}}
+      run: |
+        gh label create \
+          -R "${GITHUB_REPOSITORY_OWNER}/${REPO}" \
+          "$ARTIFACT_NAME" \
+          --description "$GITHUB_REPOSITORY/${GITHUB_RUN_ID}"
+    - if: steps.files.outputs.value != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        ARTIFACT_NAME: ${{ steps.artifact-name.outputs.value }}
+        REPO: ${{inputs.server_repository}}
+      run: |
+        gh label delete \
+          -R "${GITHUB_REPOSITORY_OWNER}/${REPO}" \
+          --yes \
+          "$ARTIFACT_NAME"
+    - if: steps.files.outputs.value != ''
+      shell: bash
+      env:
+        FILES: ${{ steps.files.outputs.value }}
+      run: |
+        echo "::error:: Changes detected. A commit will be pushed"
+        git ls-files --modified --others --exclude-standard
+        exit 1
