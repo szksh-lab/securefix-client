@@ -24,8 +24,7 @@ runs:
     - id: artifact-name
       shell: bash
       run: |
-        set -euo pipefail
-        value=$(tr -dc A-Za-z0-9 </dev/urandom | { head -c 32; cat >/dev/null; })
+        value=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 32 || :)
         echo "value=securefix-${value}" >> "$GITHUB_OUTPUT"
     - id: files
       shell: bash
